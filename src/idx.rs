@@ -6,12 +6,13 @@ use core::ops::{
     Bound
 };
 
+/// 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IdxError{
-    pub idx: usize,
-    pub data_size: usize,
-    pub type_size: usize,
+    #[allow(missing_docs)] pub idx: usize,
+    #[allow(missing_docs)] pub data_size: usize,
+    #[allow(missing_docs)] pub type_size: usize,
 }
 
 impl core::error::Error for IdxError {}
@@ -43,9 +44,12 @@ trait Sealed {}
 /// - core's [SliceIndex](core::slice::SliceIndex) is already sealed, so using this trait should always work
 #[allow(private_bounds)]
 pub trait Idx: Sealed {
+    /// Gets the starting bound.
     fn start(&self) -> Bound<usize>;
+    /// Gets the ending bound.
     fn end(&self) -> Bound<usize>;
 
+    /// Gets the full range.
     #[inline]
     fn range(&self) -> (Bound<usize>, Bound<usize>) {
         (self.start(), self.end())

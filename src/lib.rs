@@ -1,9 +1,17 @@
 
+/*!
+TODO
+ */
+
 #![cfg_attr(feature = "ptr_metadata", feature(ptr_metadata))]
 #![cfg_attr(feature = "allocator_api", feature(allocator_api))]
 #![cfg_attr(feature = "allocator_api", feature(try_reserve_kind))]
 #![cfg_attr(feature = "new_range_api", feature(new_range_api))]
+#![cfg_attr(feature = "generic_const_exprs", feature(generic_const_exprs))]
 #![no_std]
+
+#![warn(missing_docs)]
+#![warn(missing_abi)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -16,7 +24,7 @@ pub mod boxed;
 pub mod idx;
 
 #[cfg(feature = "ptr_metadata")]
-pub trait GetSizeOf<T: ?Sized> {
+trait GetSizeOf<T: ?Sized> {
     fn size(&self) -> usize;
 }
 

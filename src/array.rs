@@ -7,6 +7,11 @@ use crate::{
 use crate::GetSizeOf;
 use core::mem::ManuallyDrop;
 
+/// A typeless chunk of data.
+/// 
+/// This provides most of the `const` functionality of the crate.
+/// 
+/// This struct is just an array of bytes underneeth the hood.
 #[must_use]
 #[repr(transparent)]
 pub struct DataArray<const SIZE: usize> {
@@ -14,10 +19,10 @@ pub struct DataArray<const SIZE: usize> {
 }
 
 impl<const SIZE: usize> DataArray<SIZE> {
-    /// Constructs a new [Data] structure without touching the underling data.
+    /// Constructs a new [DataArray] structure without touching the underling data.
     /// 
     /// This method is safe because reading in it'self from the data structure is
-    /// an unsafe operation, this function marking that the udnerlyign data does
+    /// an unsafe operation, this function marking that the underlying data does
     /// not matter at all when it starts.
     #[inline] pub const fn uninit() -> DataArray<SIZE> {
         DataArray {
@@ -25,25 +30,55 @@ impl<const SIZE: usize> DataArray<SIZE> {
         }
     }
 
-    /// Constructs a new [Data] structure filled with `0`'s.
+    /// Constructs a new [DataArray] structure filled with `0`'s.
     #[inline] pub const fn zeroed() -> DataArray<SIZE> {
         DataArray {
             inner: [0x00; SIZE]
         }
     }
 
-    /// Constructs a new [Data] structure filled with `1`'s.
+    /// Constructs a new [DataArray] structure filled with whatever byte you give.
     #[inline] pub const fn filled(byte: u8) -> DataArray<SIZE> {
         DataArray {
             inner: [byte; SIZE]
         }
     }
 
-    /// Constructs a new [Data] structure with the given array as a data preset.
+    /// Constructs a new [DataArray] structure with the given array as a data preset.
     #[inline] pub const fn from_array(array: [u8; SIZE]) -> DataArray<SIZE> {
         DataArray {
             inner: array
         }
+    }
+    
+    /// Constructs a new [DataArray] structure with the given slice as a data preset.
+    /// 
+    /// Will return an error if the sizes the the slice and teh requested [DataArray] do not match.
+    pub const fn try_from_slice(slice: &[u8]) -> Result<Self, DiferentSizesError<SIZE>> {
+        if slice.len() != SIZE {
+            return Err(
+                DiferentSizesError { gotten_size: slice.len() }
+            )
+        }
+        
+        let mut data: DataArray<SIZE> = DataArray::uninit();
+        data.inner.copy_from_slice(slice);
+        Ok(data)
+    }
+    
+    /// Constructs a new [DataArray] structure with the given [DataSlice] as a data preset.
+    /// 
+    /// Will return an error if the sizes the the [DataSlice] and teh requested [DataArray] do not match.
+    pub const fn try_from_data_slice(slice: &DataSlice) -> Result<Self, DiferentSizesError<SIZE>> {
+        if slice.size() != SIZE {
+            return Err(
+                DiferentSizesError { gotten_size: slice.size() }
+            )
+        }
+        
+        let mut data: DataArray<SIZE> = DataArray::uninit();
+        data.inner.copy_from_slice(&slice.inner);
+        Ok(data)
     }
 
     /// Clones the entire chunk of data.
@@ -67,32 +102,30 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// 
     /// If you want to store a [?Sized](Sized) value use [write_unsized](Data::write_unsized)
     /// 
+    /// # ERRORS
+    /// Will return an error if the write function catches
+    /// it'self trying to write in a memory region that is
+    /// not assigned to the data structure.
+    /// 
     /// # SAFETY
     /// Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
+    #[inline]
     pub const unsafe fn write<T: Sized>(&mut self, idx: usize, value: ManuallyDrop<T>) -> Result<(), (ManuallyDrop<T>, idx::IdxError)> {
-        let type_size: usize = core::mem::size_of_val(&value);
+        self.deref_mut().write(idx, value)
+    }
 
-        if match idx.checked_add(type_size) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err((value, idx::IdxError { idx, data_size: SIZE, type_size }))
-        }
-        
-        let ptr: *const u8 = (&value as *const ManuallyDrop<T>).cast();
-        let mut at: usize = 0;
-
-        while at < type_size {
-            self.inner[at + idx] = unsafe {
-                *ptr.add(at)
-            };
-            at += 1;
-        }
-
-        core::mem::forget(value);
-
-        Ok(())
+    /// Writes the given value at the given index.
+    /// 
+    /// If you want to store a [?Sized](Sized) value use [write_unsized](DataArray::write_unsized)
+    /// 
+    /// # SAFETY
+    /// - Make sure for all the data inside to follow the
+    /// ownership and borrowing rules and guarantees.
+    /// - Make sure no data is written to a region outside of the specified data structure
+    #[inline]
+    pub const unsafe fn write_unchecked<T: Sized>(&mut self, idx: usize, value: ManuallyDrop<T>) {
+        self.deref_mut().write_unchecked(idx, value)
     }
 
     /// Fills with `0`'s the specified bytes
@@ -100,22 +133,9 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// # SAFETY
     /// Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
+    #[inline]
     pub const unsafe fn write_zeroes(&mut self, idx: usize, size: usize) -> Result<(), idx::IdxError> {
-        if match idx.checked_add(size) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: size })
-        }
-        
-        let mut at: usize = 0;
-
-        while at < size {
-            self.inner[at + idx] = 0x00;
-            at += 1;
-        }
-        
-        Ok(())
+        self.deref_mut().write_zeroes(idx, size)
     }
 
     /// Fills with `1`'s the specified bytes
@@ -123,22 +143,9 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// # SAFETY
     /// Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
+    #[inline]
     pub const unsafe fn write_ones(&mut self, idx: usize, size: usize) -> Result<(), idx::IdxError> {
-        if match idx.checked_add(size) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: size })
-        }
-        
-        let mut at: usize = 0;
-
-        while at < size {
-            self.inner[at + idx] = 0xFF;
-            at += 1;
-        }
-        
-        Ok(())
+        self.deref_mut().write_ones(idx, size)
     }
 
     /// Writes the given value at the given index.
@@ -151,120 +158,83 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// If you want to store a [Sized](Sized) value it
     /// is recomended to use [write](Data::write) instead.
     /// 
+    /// # PANICS
+    /// Will panic if a null pointer is given.
+    /// 
     /// # SAFETY
     /// - Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
     /// - Make sure that the value is not used again after being given to this funtion
     /// (eg: using [`mem::forget`](core::mem::forget) or moving the value into a [ManuallyDrop])
+    #[inline]
     pub const unsafe fn write_unsized<T: ?Sized>(&mut self, idx: usize, value: *const ManuallyDrop<T>) -> Result<(), idx::IdxError> {
-        let type_size: usize = core::mem::size_of_val(&value);
+        self.deref_mut().write_unsized(idx, value)
+    }
 
-        if match idx.checked_add(type_size) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size })
-        }
-        
-        let ptr: *const u8 = value.cast();
-        let mut at: usize = 0;
-
-        while at < type_size {
-            self.inner[at + idx] = unsafe {
-                *ptr.add(at)
-            };
-            at += 1;
-        }
-
-        Ok(())
+    /// Writes the given value at the given index.
+    /// 
+    /// This method performs a shallow copy (the)
+    /// 
+    /// This method takes ownership of T, the reason why
+    /// a box is not used is to avoid needless heap alocations.
+    /// 
+    /// If you want to store a [Sized] value it
+    /// is recomended to use [write](Data::write) instead.
+    /// 
+    /// # PANICS
+    /// Will panic if a null pointer is given.
+    /// 
+    /// # SAFETY
+    /// - Make sure for all the data inside to follow the
+    /// ownership and borrowing rules and guarantees.
+    /// - Make sure that the value is not used again after being given to this funtion
+    /// (eg: using [`mem::forget`](core::mem::forget) or moving the value into a [ManuallyDrop])
+    /// - Make sure no data is written to a region outside of the specified data structure
+    #[inline]
+    pub const unsafe fn write_unsized_unchecked<T: ?Sized>(&mut self, idx: usize, value: *const ManuallyDrop<T>) {
+        self.deref_mut().write_unsized_unchecked(idx, value)
     }
 
     /// Returns a pointer to the specified data region.
     /// 
     /// The pointer is guaranteed to ne non-null.
     // Not using NonNull is intentional
+    #[inline]
     pub const fn read<T: Sized>(&self, idx: usize) -> Result<*const T, idx::IdxError> {
-        if match idx.checked_add(core::mem::size_of::<T>()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: core::mem::size_of::<T>() })
-        }
+        self.deref().read(idx)
+    }
 
-        Ok(
-            unsafe {
-                // SAFETY: The addr of this ptr + idx is guaranteed to be in
-                // the data region given to self.inner, which is guaranteed
-                // to be in a valid address by the fact that is exists.
-                (&self.inner as *const u8).add(idx).cast()
-            }
-        )
+    /// Returns a pointer to the specified data region.
+    /// 
+    /// The pointer is guaranteed to ne non-null.
+    /// 
+    /// # SAFETY
+    /// Make sure data isn't read from outside the data structure
+    // Not using NonNull is intentional (NonNull is *mut, not *const)
+    #[inline]
+    pub const unsafe fn read_unchecked<T: Sized>(&self, idx: usize) -> *const T {
+        self.deref().read_unchecked(idx)
     }
 
     /// Returns a mutable pointer to the specified data region.
     /// 
     /// The pointer is guaranteed to ne non-null.
     // Not using NonNull is intentional
+    #[inline]
     pub const fn read_mut<T: Sized>(&mut self, idx: usize) -> Result<*mut T, idx::IdxError> {
-        if match idx.checked_add(core::mem::size_of::<T>()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: core::mem::size_of::<T>() })
-        }
-
-        Ok(
-            unsafe {
-                // SAFETY: The addr of this ptr + idx is guaranteed to be in
-                // the data region given to self.inner, which is guaranteed
-                // to be in a valid address by the fact that is exists.
-                (&mut self.inner as *mut u8).add(idx).cast()
-            }
-        )
+        self.deref_mut().read_mut(idx)
     }
 
-    /// Returns a pointer to the specified data region with the provided metadata.
+    /// Returns a mutable pointer to the specified data region.
     /// 
-    /// If you know T is sized use (read)[Data::read] instead.
-    #[cfg(feature = "ptr_metadata")]
-    pub fn read_unsized<T: ?Sized + core::ptr::Pointee>(&self, idx: usize, meta: T::Metadata) -> Result<*const T, idx::IdxError>
-    where T::Metadata: crate::GetSizeOf<T>
-    {
-        if match idx.checked_add(meta.size()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: meta.size() })
-        }
-
-        Ok(
-            core::ptr::from_raw_parts(
-                &self.inner as *const u8,
-                meta,
-            )
-        )
-    }
-
-    /// Returns a mutable pointer to the specified data region with the provided metadata.
+    /// The pointer is guaranteed to ne non-null.
     /// 
-    /// If you know T is sized use (read_mut)[Data::read_mut] instead.
-    #[cfg(feature = "ptr_metadata")]
-    pub fn read_unsized_mut<T: ?Sized + core::ptr::Pointee>(&mut self, idx: usize, meta: T::Metadata) -> Result<*mut T, idx::IdxError>
-    where T::Metadata: crate::GetSizeOf<T>
-    {
-        if match idx.checked_add(meta.size()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: meta.size() })
-        }
-
-        Ok(
-            core::ptr::from_raw_parts_mut(
-                &mut self.inner as *mut u8,
-                meta,
-            )
-        )
+    /// # SAFETY
+    /// Make sure data isn't read from outside the data structure
+    // Not using NonNull is intentional (consistancy with read)
+    #[inline]
+    pub const unsafe fn read_mut_unchecked<T: Sized>(&mut self, idx: usize) -> *mut T {
+        self.deref_mut().read_mut_unchecked(idx)
     }
 
     /// Takes the value from the specified region.
@@ -275,37 +245,9 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// - Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
     /// - Make sure the data gotten from inside is a valid T
+    #[inline]
     pub const unsafe fn take<T: Sized>(&self, idx: usize) -> Result<T, idx::IdxError> {
-        if match idx.checked_add(core::mem::size_of::<T>()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: core::mem::size_of::<T>() })
-        }
-
-        use core::mem::MaybeUninit;
-
-        let mut value: MaybeUninit<T> = MaybeUninit::uninit();
-
-        let ptr: *mut u8 = core::ptr::from_mut(&mut value).cast();
-        
-        // SAFETY: Because we copy size_of<T> bytes, this means the copy will be a perfect fit
-        ptr.copy_from_nonoverlapping(
-            unsafe {
-                // SAFETY: The addr of this ptr + idx is guaranteed to be in
-                // the data region given to self.inner, which is guaranteed
-                // to be in a valid address by the fact that is exists.
-                (&self.inner as *const u8).add(idx)
-            },
-            core::mem::size_of::<T>(),
-        );
-
-        Ok(
-            unsafe {
-                // SAFETY?: Safety of a valid value from the copied mem regious is assured by the caller.
-                value.assume_init()
-            }
-        )
+        self.deref().take(idx)
     }
 
     /// Takes the value from the specified region and writes a new value in it's palce.
@@ -314,51 +256,84 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// - Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
     /// - Make sure the data gotten from inside is a valid T
+    #[inline]
     pub const unsafe fn replace<T: Sized>(&mut self, idx: usize, value: ManuallyDrop<T>) -> Result<T, idx::IdxError> {
-        if match idx.checked_add(core::mem::size_of::<T>()) {
-            Some(size) => size >= SIZE,
-            None => true,
-        } {
-            return Err(idx::IdxError { idx, data_size: SIZE, type_size: core::mem::size_of::<T>() })
-        }
-        
-        Ok(
-            unsafe {
-                // SAFETY?:
-                // - Due to the ptr always pointing to a valid
-                //   memory region and it being non-null,
-                //   it will be valid.
-                // - ...
-                // - The caller's problem lol
-                core::ptr::replace(
-                    // SAFETY: The addr of this ptr + idx is guaranteed to be in
-                    // the data region given to self.inner, which is guaranteed
-                    // to be in a valid address by the fact that is exists.
-                    (&mut self.inner as *mut u8).add(idx).cast(),
-                    ManuallyDrop::into_inner(value)
-                )
-            }
-        )
+        self.deref_mut().replace(idx, value)
     }
 
     #[inline]
-    pub const fn idx_const(&self, start: core::ops::Bound<usize>, end: core::ops::Bound<usize>) -> Option<&DataSlice> {
-        self.deref().idx_const(start, end)
+    /// Get's a subslice of the data structure in a const context.
+    pub const fn get_const(&self, start: core::ops::Bound<usize>, end: core::ops::Bound<usize>) -> Option<&DataSlice> {
+        self.deref().get_const(start, end)
     }
 
     #[inline]
-    pub const fn idx_mut_const(&mut self, start: core::ops::Bound<usize>, end: core::ops::Bound<usize>) -> Option<&mut DataSlice> {
-        self.deref_mut().idx_mut_const(start, end)
+    /// Get's a mutable subslice of the data structure in a const context.
+    pub const fn get_mut_const(&mut self, start: core::ops::Bound<usize>, end: core::ops::Bound<usize>) -> Option<&mut DataSlice> {
+        self.deref_mut().get_mut_const(start, end)
     }
 
+    /// The const version of the [Deref](core::ops::Deref) trait.
     #[inline]
     pub const fn deref(&self) -> &crate::slice::DataSlice {
         crate::slice::DataSlice::from_slice(&self.inner)
     }
 
+    /// The const version of the [DerefMut](core::ops::DerefMut) trait.
     #[inline]
     pub const fn deref_mut(&mut self) -> &mut crate::slice::DataSlice {
         crate::slice::DataSlice::from_slice_mut(&mut self.inner)
+    }
+}
+
+use core::convert::TryFrom;
+
+/// The error given when converting from a slice or a [DataSlice] into a [DataArray].
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DiferentSizesError<const SIZE: usize> { gotten_size: usize }
+
+impl<const SIZE: usize> core::error::Error for DiferentSizesError<SIZE> {}
+impl<const SIZE: usize> core::fmt::Display for DiferentSizesError<SIZE> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Failed to turn slice with size `{got}` into a DataArray of size {SIZE} because they are of diferent sizes.", got = self.gotten_size)
+    }
+}
+
+impl<const SIZE: usize> From<[u8; SIZE]> for DataArray<SIZE> {
+    #[inline] fn from(inner: [u8; SIZE]) -> Self {
+        DataArray { inner }
+    }
+}
+
+impl<const SIZE: usize> TryFrom<&[u8]> for DataArray<SIZE> {
+    type Error = DiferentSizesError<SIZE>;
+
+    #[inline] fn try_from(slice: &[u8]) -> Result<Self, DiferentSizesError<SIZE>> {
+        if slice.len() != SIZE {
+            return Err(
+                DiferentSizesError { gotten_size: slice.len() }
+            )
+        }
+        
+        let mut data: DataArray<SIZE> = DataArray::uninit();
+        data.inner.copy_from_slice(slice);
+        Ok(data)
+    }
+}
+
+impl<const SIZE: usize> TryFrom<&DataSlice> for DataArray<SIZE> {
+    type Error = DiferentSizesError<SIZE>;
+
+    #[inline] fn try_from(slice: &DataSlice) -> Result<Self, DiferentSizesError<SIZE>> {
+        if slice.size() != SIZE {
+            return Err(
+                DiferentSizesError { gotten_size: slice.size() }
+            )
+        }
+        
+        let mut data: DataArray<SIZE> = DataArray::uninit();
+        data.inner.copy_from_slice(&slice.inner);
+        Ok(data)
     }
 }
 
@@ -411,7 +386,7 @@ impl<I: idx::Idx, const SIZE: usize> core::ops::Index<I> for DataArray<SIZE> {
     type Output = DataSlice;
 
     fn index(&self, index: I) -> &DataSlice {
-        match self.idx(index) {
+        match self.get(index) {
             Some(slice) => slice,
             None => panic!("Index out of bounds!"),
         }
@@ -420,9 +395,74 @@ impl<I: idx::Idx, const SIZE: usize> core::ops::Index<I> for DataArray<SIZE> {
 
 impl<I: idx::Idx, const SIZE: usize> core::ops::IndexMut<I> for DataArray<SIZE> {
     fn index_mut(&mut self, index: I) -> &mut DataSlice {
-        match self.idx_mut(index) {
+        match self.get_mut(index) {
             Some(slice) => slice,
             None => panic!("Index out of bounds!"),
         }
     }
 }
+
+/// Constructs a new data array structure without touching the underlying data.
+/// 
+/// Go to [DataArray::uninit] for more infomration.
+#[inline(always)]
+pub const fn uninit<const SIZE: usize>() -> DataArray<SIZE> {
+    DataArray::uninit()
+}
+
+/// Constructs a new data array from a given sized value.
+pub const fn from_copy<T: Copy>(value: T) -> DataArray<{core::mem::size_of::<T>()}> {
+    let mut data = uninit();
+    unsafe {
+        // SAFETY:
+        // - The value is copy, there for the bits can be copied perfectly
+        // - The data structure is the exact same size as the written data
+        //   And it's written starting from the vary first byte
+        //   Making sure it fits perfectly inside the data structure
+        data.write_unchecked(0, ManuallyDrop::new(value));
+    }
+    data
+}
+
+/// Constructs a new data array from a given sized value.
+/// 
+/// # SAFETY
+/// Make sure for all the data inside to follow the
+/// ownership and borrowing rules and guarantees.
+pub const unsafe fn from_sized<T: Sized>(value: T) -> DataArray<{core::mem::size_of::<T>()}> {
+    let mut data = uninit();
+    unsafe {
+        // SAFETY:
+        // - It is up to the caller to uphold the safety of this call
+        // - The data structure is the exact same size as the written data
+        //   And it's written starting from the vary first byte
+        //   Making sure it fits perfectly inside the data structure
+        data.write_unchecked(0, ManuallyDrop::new(value));
+    }
+    data
+}
+
+// /// Constructs a new data array from a given sized value.
+// /// 
+// /// # SAFETY
+// /// Make sure for all the data inside to follow the
+// /// ownership and borrowing rules and guarantees.
+// pub const unsafe fn try_from_unsized<const SIZE: usize, T: ?Sized>(value: *mut T) -> Option<DataArray<SIZE>> {
+//     // let type_size: usize = core::mem::size_of_val(value);
+//     let mut data = uninit();
+//     unsafe {
+//         // SAFETY:
+//         // - It is up to the caller to uphold the safety of this call
+//         // - The data structure is the exact same size as the written data
+//         //   And it's written starting from the vary first byte
+//         //   Making sure it fits perfectly inside the data structure
+//         data.write_unchecked(0, ManuallyDrop::new(value));
+//     }
+//     Some(data)
+// }
+
+// /// Constructs a new data structure using a function to set the starting bytes.
+// #[inline]
+// pub fn from_fn<const SIZE: usize>(f: impl FnMut(usize) -> u8) -> DataArray<SIZE> {
+//     DataArray { inner: core::array::from_fn(f) }
+// }

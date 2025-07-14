@@ -1,6 +1,6 @@
 [package]
 name = "typeless-data"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 serde = { version = "*", optional = true, features = ["serde_derive"]}
@@ -10,9 +10,10 @@ default = ["alloc"]
 
 alloc = []
 
-full_nightly = ["allocator_api", "new_range_api", "ptr_metadata"]
+full_nightly = ["allocator_api", "new_range_api", "ptr_metadata", "generic_const_exprs"]
 ptr_metadata = []
 allocator_api = ["alloc"]
 new_range_api = []
+generic_const_exprs = []
 
 serde = ["dep:serde"]
