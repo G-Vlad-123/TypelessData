@@ -1,4 +1,23 @@
 
+/*!
+This module provides the [`DataBoxed`] data structure and all it's associated
+functions, methods and items.
+
+[`DataBoxed`] is made to be used when you do not know the size of the data structure
+or when you know you want to cahnge the size of the data structure and you wanna save
+on memory.
+
+Under the surface a [`DataBoxed`] is just a boxed array, that get's reallocated
+when the user needs to change it's size.
+
+[`DataBoxed`] is the only data structure that can not be used in a const context
+at all, for now if you want a data strcture in a const cotnext use [`DataArray`](crate::array::DataArray)
+and/or [`DataSlice`](crate::slice::DataSlice).
+
+## Note
+For now [`DataBoxed`] does not give any support for reallocation, this will be added in a future version.
+ */
+
 #[cfg(feature = "allocator_api")]
 use alloc::{
     alloc::{
@@ -18,6 +37,7 @@ use crate::alloc::{
     boxed::Box,
     collections::TryReserveError,
 };
+use crate::slice::DataSlice;
 
 /// A boxed typeless chunk of data.
 /// 
@@ -35,6 +55,15 @@ pub struct DataBoxed<A: Allocator = Global> {
     pub(crate) inner: Box<[u8], A>
 }
 
+/// A boxed typeless chunk of data.
+/// 
+/// In case you don't know how large a chunk of data you want to have,
+/// and to change it's size when it is needed.
+/// 
+/// This struct was NOT made for frequent reallocations,
+/// and is optimized for memory usage.
+/// 
+/// This struct is just a `Box<\[u8\]>` underneeth the hood.
 #[must_use]
 #[cfg(not(feature = "allocator_api"))]
 // #[optimize(size)]
@@ -308,3 +337,285 @@ impl core::ops::DerefMut for DataBoxed {
         crate::slice::DataSlice::from_slice_mut(&mut self.inner)
     }
 }
+
+#[cfg(feature = "allocator_api")]
+impl<A: Allocator> core::fmt::Debug for DataBoxed<A> {
+    #[inline] fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        <crate::slice::DataSlice as core::fmt::Debug>::fmt(&self, f)
+    }
+}
+
+#[cfg(not(feature = "allocator_api"))]
+impl core::fmt::Debug for DataBoxed {
+    #[inline] fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        <crate::slice::DataSlice as core::fmt::Debug>::fmt(&self, f)
+    }
+}
+
+#[cfg(feature = "allocator_api")]
+impl<A: Allocator + Default> Default for DataBoxed<A> {
+    #[inline] fn default() -> Self { DataBoxed::empty_in(A::default()) }
+}
+
+#[cfg(not(feature = "allocator_api"))]
+impl Default for DataBoxed {
+    #[inline] fn default() -> Self { DataBoxed::empty() }
+}
+
+#[cfg(feature = "std")]
+impl<'mutex> DerefDataSlice for crate::std::sync::MutexGuard<'mutex, crate::slice::DataSlice> {}
+
+trait DerefDataSlice: core::ops::DerefMut<Target = crate::slice::DataSlice> {}
+
+#[cfg(feature = "allocator_api")]
+mod alloc_api_impl {
+    use super::*;
+
+    // use alloc::{
+    //     sync::Arc,
+    //     rc::Rc,
+    // };
+
+    use crate::slice::DataSlice;
+
+    impl<A: Allocator> DerefDataSlice for DataBoxed<A> {}
+    impl<A: Allocator> DerefDataSlice for Box<DataSlice, A> {}
+}
+
+#[cfg(not(feature = "allocator_api"))]
+mod alloc_api_impl {
+    use super::*;
+
+    use crate::slice::DataSlice;
+
+    impl DerefDataSlice for DataBoxed {}
+    impl DerefDataSlice for Box<DataSlice> {}
+}
+
+unsafe impl<D: DerefDataSlice> crate::RawDataStructure for D {
+    #[inline]
+    fn size(&self) -> usize {
+        <crate::slice::DataSlice as crate::RawDataStructure>::size(self)
+    }
+
+    #[inline]
+    fn read_validity(&self, idx: usize, size: usize) -> Result<(), crate::idx::IdxError> {
+        <crate::slice::DataSlice as crate::RawDataStructure>::read_validity(self, idx, size)
+    }
+
+    #[inline]
+    unsafe fn write_zeroes_unchecked(&mut self, idx: usize, size: usize) {
+        <crate::slice::DataSlice as crate::RawDataStructure>::write_zeroes_unchecked(self, idx, size)
+    }
+
+    #[inline]
+    unsafe fn write_ones_unchecked(&mut self, idx: usize, size: usize) {
+        <crate::slice::DataSlice as crate::RawDataStructure>::write_ones_unchecked(self, idx, size)
+    }
+
+    #[inline]
+    unsafe fn write_unsized_unchecked<T: ?Sized>(&mut self, idx: usize, value: *const core::mem::ManuallyDrop<T>) {
+        <crate::slice::DataSlice as crate::RawDataStructure>::write_unsized_unchecked(self, idx, value)
+    }
+
+    #[inline]
+    unsafe fn read_unchecked<T: Sized>(&self, idx: usize) -> *const T {
+        <crate::slice::DataSlice as crate::RawDataStructure>::read_unchecked(self, idx)
+    }
+
+    #[inline]
+    unsafe fn read_mut_unchecked<T: Sized>(&mut self, idx: usize) -> *mut T {
+        <crate::slice::DataSlice as crate::RawDataStructure>::read_mut_unchecked(self, idx)
+    }
+
+    #[inline]
+    unsafe fn read_unsized_unchecked<T: ?Sized + core::ptr::Pointee>(&self, idx: usize, meta: T::Metadata) -> *const T {
+        <crate::slice::DataSlice as crate::RawDataStructure>::read_unsized_unchecked(self, idx, meta)
+    }
+
+    #[inline]
+    unsafe fn read_unsized_mut_unchecked<T: ?Sized + core::ptr::Pointee>(&mut self, idx: usize, meta: T::Metadata) -> *mut T {
+        <crate::slice::DataSlice as crate::RawDataStructure>::read_unsized_mut_unchecked(self, idx, meta)
+    }
+
+    #[inline]
+    unsafe fn take_unchecked<T: Sized>(&self, idx: usize) -> T {
+        <crate::slice::DataSlice as crate::RawDataStructure>::take_unchecked(self, idx)
+    }
+
+    #[inline]
+    unsafe fn clone_from_unchecked(&mut self, data: &Self) {
+        <crate::slice::DataSlice as crate::RawDataStructure>::clone_from_unchecked(self, data)
+    }
+
+    type DataByte = u8;
+
+    #[inline]
+    unsafe fn get_at_idx(&self, idx: usize) -> Self::DataByte {
+        <crate::slice::DataSlice as crate::RawDataStructure>::get_at_idx(self, idx)
+    }
+
+    #[inline]
+    unsafe fn set_at_idx(&mut self, idx: usize, byte: Self::DataByte) {
+        <crate::slice::DataSlice as crate::RawDataStructure>::set_at_idx(self, idx, byte)
+    }
+}
+
+impl<D: DerefDataSlice> crate::DataStructureSlice for D {
+    #[inline]
+    unsafe fn get_unchecked(&self, idx: impl crate::idx::Idx) -> *const crate::slice::DataSlice {
+        self.deref().get_unchecked(idx)
+    }
+
+    #[inline]
+    unsafe fn get_mut_unchecked(&mut self, idx: impl crate::idx::Idx) -> *mut crate::slice::DataSlice {
+        self.deref_mut().get_mut_unchecked(idx)
+    }
+}
+
+impl crate::DataStructureAllocConstructor for DataBoxed {
+    type ConstructorError = TryReserveError where Self: Sized;
+
+    #[inline]
+    fn empty() -> Self where Self: Sized {
+        DataBoxed { inner: Box::new([]) }
+    }
+
+    #[inline]
+    fn uninit(size: usize) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        DataBoxed::uninit(size)
+    }
+
+    #[inline]
+    fn zeroed(size: usize) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        DataBoxed::zeroed(size)
+    }
+
+    #[inline]
+    fn filled(size: usize, byte: u8) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        DataBoxed::filled(size, byte)
+    }
+
+    #[inline]
+    fn from_data_array<const SIZE: usize>(array: crate::array::DataArray<SIZE>) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        let mut data = DataBoxed::uninit(SIZE)?;
+        data.inner.copy_from_slice(&array.inner);
+        Ok(data)
+    }
+
+    #[inline]
+    unsafe fn clone(&self) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        self.clone()
+    }
+}
+
+impl crate::DataStructureAllocConstructor for Box<crate::slice::DataSlice> {
+    type ConstructorError = TryReserveError where Self: Sized;
+
+    #[inline]
+    fn empty() -> Self where Self: Sized {
+        Default::default()
+    }
+
+    #[inline]
+    fn uninit(size: usize) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        Ok(DataSlice::from_boxed_slice(DataBoxed::uninit(size)?.inner))
+    }
+
+    #[inline]
+    fn filled(size: usize, byte: u8) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        Ok(DataSlice::from_boxed_slice(DataBoxed::filled(size, byte)?.inner))
+    }
+
+    #[inline]
+    fn from_data_array<const SIZE: usize>(array: crate::array::DataArray<SIZE>) -> Result<Self, Self::ConstructorError> where Self: Sized {
+        // Ok(
+        //     unsafe {
+        //         core::mem::transmute(
+        //             #[cfg(feature = "allocator_api")] {
+        //                 let slice: Box<[u8]> = Box::try_new(array.inner);
+        //                 slice
+        //             }
+        //             #[cfg(not(feature = "allocator_api"))] {
+        //                 let slice: Box<[u8]> = Box::new(array.inner);
+        //                 slice
+        //             }
+        //         )
+        //     }
+        // )
+
+        todo!()
+    }
+}
+
+// unsafe impl crate::RawDataStructure for alloc::vec::Vec<u8> {
+//     #[inline]
+//     fn size(&self) -> usize {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::size(crate::slice::DataSlice::from_slice(self))
+//     }
+
+//     #[inline]
+//     fn read_validity(&self, idx: usize, size: usize) -> Result<(), crate::idx::IdxError> {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::read_validity(crate::slice::DataSlice::from_slice(self), idx, size)
+//     }
+
+//     #[inline]
+//     unsafe fn write_zeroes_unchecked(&mut self, idx: usize, size: usize) {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::write_zeroes_unchecked(crate::slice::DataSlice::from_slice_mut(self), idx, size)
+//     }
+
+//     #[inline]
+//     unsafe fn write_ones_unchecked(&mut self, idx: usize, size: usize) {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::write_ones_unchecked(crate::slice::DataSlice::from_slice_mut(self), idx, size)
+//     }
+
+//     #[inline]
+//     unsafe fn write_unsized_unchecked<T: ?Sized>(&mut self, idx: usize, value: *const core::mem::ManuallyDrop<T>) {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::write_unsized_unchecked(crate::slice::DataSlice::from_slice_mut(self), idx, value)
+//     }
+
+//     #[inline]
+//     unsafe fn read_unchecked<T: Sized>(&self, idx: usize) -> *const T {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::read_unchecked(crate::slice::DataSlice::from_slice(self), idx)
+//     }
+
+//     #[inline]
+//     unsafe fn read_mut_unchecked<T: Sized>(&mut self, idx: usize) -> *mut T {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::read_mut_unchecked(crate::slice::DataSlice::from_slice_mut(self), idx)
+//     }
+
+//     #[inline]
+//     unsafe fn read_unsized_unchecked<T: ?Sized + core::ptr::Pointee>(&self, idx: usize, meta: T::Metadata) -> *const T {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::read_unsized_unchecked(crate::slice::DataSlice::from_slice(self), idx, meta)
+//     }
+
+//     #[inline]
+//     unsafe fn read_unsized_mut_unchecked<T: ?Sized + core::ptr::Pointee>(&mut self, idx: usize, meta: T::Metadata) -> *mut T {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::read_unsized_mut_unchecked(crate::slice::DataSlice::from_slice_mut(self), idx, meta)
+//     }
+
+//     #[inline]
+//     unsafe fn take_unchecked<T: Sized>(&self, idx: usize) -> T {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::take_unchecked(crate::slice::DataSlice::from_slice(self), idx)
+//     }
+
+//     #[inline]
+//     unsafe fn clone_from_unchecked(&mut self, data: &Self) {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::clone_from_unchecked(
+//             crate::slice::DataSlice::from_slice_mut(self),
+//             crate::slice::DataSlice::from_slice(data),
+//         )
+//     }
+
+//     type DataByte = u8;
+
+//     #[inline]
+//     unsafe fn get_at_idx(&self, idx: usize) -> Self::DataByte {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::get_at_idx(crate::slice::DataSlice::from_slice(self), idx)
+//     }
+
+//     #[inline]
+//     unsafe fn set_at_idx(&mut self, idx: usize, byte: Self::DataByte) {
+//         <crate::slice::DataSlice as crate::RawDataStructure>::set_at_idx(crate::slice::DataSlice::from_slice_mut(self), idx, byte)
+//     }
+// }

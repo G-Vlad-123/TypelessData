@@ -1,10 +1,19 @@
 
+/*!
+This module provides the [`DataArray`] data structure and all it's associated
+functions, methods and items.
+
+[`DataArray`] is made to be usable any context.
+
+Under the surface a [`DataArray`] is just an array of bytes with the special designation
+that it is a region of memory where each peace of data and it's type is not determined by
+the compiler.
+ */
+
 use crate::{
     idx,
     slice::DataSlice,
 };
-#[cfg(feature = "ptr_metadata")]
-use crate::GetSizeOf;
 use core::mem::ManuallyDrop;
 
 /// A typeless chunk of data.
@@ -19,7 +28,7 @@ pub struct DataArray<const SIZE: usize> {
 }
 
 impl<const SIZE: usize> DataArray<SIZE> {
-    /// Constructs a new [DataArray] structure without touching the underling data.
+    /// Constructs a new [`DataArray`] structure without touching the underling data.
     /// 
     /// This method is safe because reading in it'self from the data structure is
     /// an unsafe operation, this function marking that the underlying data does
@@ -30,30 +39,30 @@ impl<const SIZE: usize> DataArray<SIZE> {
         }
     }
 
-    /// Constructs a new [DataArray] structure filled with `0`'s.
+    /// Constructs a new [`DataArray`] structure filled with `0`'s.
     #[inline] pub const fn zeroed() -> DataArray<SIZE> {
         DataArray {
             inner: [0x00; SIZE]
         }
     }
 
-    /// Constructs a new [DataArray] structure filled with whatever byte you give.
+    /// Constructs a new [`DataArray`] structure filled with whatever byte you give.
     #[inline] pub const fn filled(byte: u8) -> DataArray<SIZE> {
         DataArray {
             inner: [byte; SIZE]
         }
     }
 
-    /// Constructs a new [DataArray] structure with the given array as a data preset.
+    /// Constructs a new [`DataArray`] structure with the given array as a data preset.
     #[inline] pub const fn from_array(array: [u8; SIZE]) -> DataArray<SIZE> {
         DataArray {
             inner: array
         }
     }
     
-    /// Constructs a new [DataArray] structure with the given slice as a data preset.
+    /// Constructs a new [`DataArray`] structure with the given slice as a data preset.
     /// 
-    /// Will return an error if the sizes the the slice and teh requested [DataArray] do not match.
+    /// Will return an error if the sizes the the slice and teh requested [`DataArray`] do not match.
     pub const fn try_from_slice(slice: &[u8]) -> Result<Self, DiferentSizesError<SIZE>> {
         if slice.len() != SIZE {
             return Err(
@@ -66,9 +75,9 @@ impl<const SIZE: usize> DataArray<SIZE> {
         Ok(data)
     }
     
-    /// Constructs a new [DataArray] structure with the given [DataSlice] as a data preset.
+    /// Constructs a new [`DataArray`] structure with the given [`DataSlice`] as a data preset.
     /// 
-    /// Will return an error if the sizes the the [DataSlice] and teh requested [DataArray] do not match.
+    /// Will return an error if the sizes the the [`DataSlice`] and teh requested [`DataArray`] do not match.
     pub const fn try_from_data_slice(slice: &DataSlice) -> Result<Self, DiferentSizesError<SIZE>> {
         if slice.size() != SIZE {
             return Err(
@@ -100,7 +109,7 @@ impl<const SIZE: usize> DataArray<SIZE> {
 
     /// Writes the given value at the given index.
     /// 
-    /// If you want to store a [?Sized](Sized) value use [write_unsized](Data::write_unsized)
+    /// If you want to store a [?Sized](Sized) value use [write_unsized](DataArray::write_unsized)
     /// 
     /// # ERRORS
     /// Will return an error if the write function catches
@@ -155,8 +164,8 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// This method takes ownership of T, the reason why
     /// a box is not used is to avoid needless heap alocations.
     /// 
-    /// If you want to store a [Sized](Sized) value it
-    /// is recomended to use [write](Data::write) instead.
+    /// If you want to store a sized value it
+    /// is recomended to use [write](DataArray::write) instead.
     /// 
     /// # PANICS
     /// Will panic if a null pointer is given.
@@ -178,7 +187,7 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// This method takes ownership of T, the reason why
     /// a box is not used is to avoid needless heap alocations.
     /// 
-    /// If you want to store a [Sized] value it
+    /// If you want to store a sized value it
     /// is recomended to use [write](Data::write) instead.
     /// 
     /// # PANICS
@@ -188,7 +197,7 @@ impl<const SIZE: usize> DataArray<SIZE> {
     /// - Make sure for all the data inside to follow the
     /// ownership and borrowing rules and guarantees.
     /// - Make sure that the value is not used again after being given to this funtion
-    /// (eg: using [`mem::forget`](core::mem::forget) or moving the value into a [ManuallyDrop])
+    /// (eg: using [`mem::forget`](core::mem::forget) or moving the value into a [`ManuallyDrop`])
     /// - Make sure no data is written to a region outside of the specified data structure
     #[inline]
     pub const unsafe fn write_unsized_unchecked<T: ?Sized>(&mut self, idx: usize, value: *const ManuallyDrop<T>) {
@@ -235,6 +244,34 @@ impl<const SIZE: usize> DataArray<SIZE> {
     #[inline]
     pub const unsafe fn read_mut_unchecked<T: Sized>(&mut self, idx: usize) -> *mut T {
         self.deref_mut().read_mut_unchecked(idx)
+    }
+
+    /// Returns a pointer to the specified data region with the provided metadata.
+    /// 
+    /// If you know T is sized use [read_unchecked](DataSlice::read_unchecked) instead.
+    /// 
+    /// # SAFETY
+    /// Make sure data isn't read from outside the data structure
+    #[cfg(feature = "ptr_metadata")]
+    #[allow(private_bounds)]
+    #[inline]
+    pub const unsafe fn read_unsized_unchecked<T: ?Sized + core::ptr::Pointee>(&self, idx: usize, meta: T::Metadata) -> *const T
+    {
+        self.deref().read_unsized_unchecked(idx, meta)
+    }
+    
+    /// Returns a pointer to the specified data region with the provided metadata.
+    /// 
+    /// If you know T is sized use [read_mut_unchecked](DataSlice::read_mut_unchecked) instead.
+    /// 
+    /// # SAFETY
+    /// Make sure data isn't read from outside the data structure
+    #[cfg(feature = "ptr_metadata")]
+    #[allow(private_bounds)]
+    #[inline]
+    pub const unsafe fn read_unsized_mut_unchecked<T: ?Sized + core::ptr::Pointee>(&mut self, idx: usize, meta: T::Metadata) -> *mut T
+    {
+        self.deref_mut().read_unsized_mut_unchecked(idx, meta)
     }
 
     /// Takes the value from the specified region.
@@ -288,7 +325,7 @@ impl<const SIZE: usize> DataArray<SIZE> {
 
 use core::convert::TryFrom;
 
-/// The error given when converting from a slice or a [DataSlice] into a [DataArray].
+/// The error given when converting from a slice or a [`DataSlice`] into a [`DataArray`].
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DiferentSizesError<const SIZE: usize> { gotten_size: usize }
 
@@ -411,6 +448,7 @@ pub const fn uninit<const SIZE: usize>() -> DataArray<SIZE> {
 }
 
 /// Constructs a new data array from a given sized value.
+#[cfg(feature = "generic_const_exprs")]
 pub const fn from_copy<T: Copy>(value: T) -> DataArray<{core::mem::size_of::<T>()}> {
     let mut data = uninit();
     unsafe {
@@ -429,6 +467,7 @@ pub const fn from_copy<T: Copy>(value: T) -> DataArray<{core::mem::size_of::<T>(
 /// # SAFETY
 /// Make sure for all the data inside to follow the
 /// ownership and borrowing rules and guarantees.
+#[cfg(feature = "generic_const_exprs")]
 pub const unsafe fn from_sized<T: Sized>(value: T) -> DataArray<{core::mem::size_of::<T>()}> {
     let mut data = uninit();
     unsafe {
@@ -466,3 +505,93 @@ pub const unsafe fn from_sized<T: Sized>(value: T) -> DataArray<{core::mem::size
 // pub fn from_fn<const SIZE: usize>(f: impl FnMut(usize) -> u8) -> DataArray<SIZE> {
 //     DataArray { inner: core::array::from_fn(f) }
 // }
+
+unsafe impl<const SIZE: usize> crate::RawDataStructure for DataArray<SIZE> {
+    #[inline] fn size(&self) -> usize { SIZE }
+
+    fn read_validity(&self, idx: usize, size: usize) -> Result<(), idx::IdxError> {
+        if match idx.checked_add(size) {
+            Some(size) => size < self.size(),
+            None => false,
+        } {
+            Ok(())
+        } else {
+            Err(idx::IdxError { idx, data_size: self.size(), type_size: size })
+        }
+    }
+
+    #[inline]
+    fn full_validity(&self, idx: usize, size: usize) -> Result<(), idx::IdxError> {
+        self.read_validity(idx, size)
+    }
+
+    unsafe fn clone_from_unchecked(&mut self, data: &Self) {
+        for (idx, byte) in self.iter_mut().enumerate() {
+            *byte = data.inner[idx]
+        }
+    }
+    
+    #[inline]
+    unsafe fn write_zeroes_unchecked(&mut self, idx: usize, size: usize) {
+        self.deref_mut().write_zeroes_unchecked(idx, size)
+    }
+
+    #[inline]
+    unsafe fn write_ones_unchecked(&mut self, idx: usize, size: usize) {
+        self.deref_mut().write_ones_unchecked(idx, size)
+    }
+
+    #[inline]
+    unsafe fn write_unsized_unchecked<T: ?Sized>(&mut self, idx: usize, value: *const core::mem::ManuallyDrop<T>) {
+        self.deref_mut().write_unsized_unchecked(idx, value)
+    }
+
+    #[inline]
+    unsafe fn read_unchecked<T: Sized>(&self, idx: usize) -> *const T {
+        self.deref().read_unchecked(idx)
+    }
+
+    #[inline]
+    unsafe fn read_mut_unchecked<T: Sized>(&mut self, idx: usize) -> *mut T {
+        self.deref_mut().read_mut_unchecked(idx)
+    }
+
+    #[inline]
+    #[cfg(feature = "ptr_metadata")]
+    unsafe fn read_unsized_unchecked<T: ?Sized + core::ptr::Pointee>(&self, idx: usize, meta: T::Metadata) -> *const T {
+        self.deref().read_unsized_unchecked(idx, meta)
+    }
+
+    #[inline]
+    #[cfg(feature = "ptr_metadata")]
+    unsafe fn read_unsized_mut_unchecked<T: ?Sized + core::ptr::Pointee>(&mut self, idx: usize, meta: T::Metadata) -> *mut T {
+        self.deref_mut().read_unsized_mut_unchecked(idx, meta)
+    }
+
+    #[inline]
+    unsafe fn take_unchecked<T: Sized>(&self, idx: usize) -> T {
+        self.deref().take_unchecked(idx)
+    }
+
+    type DataByte = u8;
+
+    #[inline]
+    unsafe fn get_at_idx(&self, idx: usize) -> u8 {
+        self.inner[idx]
+    }
+
+    #[inline]
+    unsafe fn set_at_idx(&mut self, idx: usize, byte: u8) {
+        self.inner[idx] = byte;
+    }
+}
+
+impl<const SIZE: usize> crate::DataStructureSlice for DataArray<SIZE> {
+    unsafe fn get_unchecked(&self, idx: impl idx::Idx) -> *const crate::slice::DataSlice {
+        self.deref().get_unchecked(idx)
+    }
+
+    unsafe fn get_mut_unchecked(&mut self, idx: impl idx::Idx) -> *mut crate::slice::DataSlice {
+        self.deref_mut().get_mut_unchecked(idx)
+    }
+}

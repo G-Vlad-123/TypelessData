@@ -1,4 +1,8 @@
 
+/*!
+This module provides helper items for indexing operations on all the data structures.
+ */
+
 #[cfg(feature = "new_range_api")]
 use core::range;
 use core::ops::{
@@ -9,7 +13,7 @@ use core::ops::{
 /// 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IdxError{
+pub struct IdxError {
     #[allow(missing_docs)] pub idx: usize,
     #[allow(missing_docs)] pub data_size: usize,
     #[allow(missing_docs)] pub type_size: usize,
